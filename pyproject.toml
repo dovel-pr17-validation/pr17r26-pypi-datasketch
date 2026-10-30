@@ -26,7 +26,7 @@ classifiers = [
 dependencies = ["numpy>=1.11", "scipy>=1.0.0"]
 
 [project.optional-dependencies]
-cassandra = ["cassandra-driver>=3.20"]
+cassandra = ["cassandra-driver>=3.29.3,<3.30.1"]
 redis = ["redis>=2.10.0"]
 bloom = ["pybloomfilter3>=0.7.2"]
 benchmark = [
@@ -44,7 +44,7 @@ benchmark = [
   "fonttools>=4.60.2",
 ]
 test = [
-  "cassandra-driver>=3.20",
+  "cassandra-driver>=3.29.3,<3.30.1",
   "redis>=2.10.0",
   "mock>=2.0.0",
   "mockredispy",

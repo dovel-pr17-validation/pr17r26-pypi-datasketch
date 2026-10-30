@@ -585,8 +585,8 @@ test = [
 requires-dist = [
     { name = "aiounittest", marker = "extra == 'aio'" },
     { name = "aiounittest", marker = "extra == 'experimental-aio'" },
-    { name = "cassandra-driver", marker = "extra == 'cassandra'", specifier = ">=3.20" },
-    { name = "cassandra-driver", marker = "extra == 'test'", specifier = ">=3.20" },
+    { name = "cassandra-driver", marker = "extra == 'cassandra'", specifier = ">=3.29.3,<3.30.1" },
+    { name = "cassandra-driver", marker = "extra == 'test'", specifier = ">=3.29.3,<3.30.1" },
     { name = "coverage", marker = "extra == 'test'" },
     { name = "fonttools", marker = "extra == 'benchmark'", specifier = ">=4.60.2" },
     { name = "matplotlib", marker = "extra == 'benchmark'", specifier = ">=3.1.2" },
