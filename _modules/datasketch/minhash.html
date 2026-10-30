@@ -1,0 +1,964 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>datasketch.minhash &mdash; datasketch 2.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=51b770b3"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            datasketch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../b-bit-minhash.html">b-bit MinHash</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../documentation.html">API Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../hyperloglog.html">HyperLogLog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../hyperloglog.html#hyperloglog-plusplus">HyperLogLog++</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../lsh.html">MinHash LSH</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../lshbloom.html">LSHBloom</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../lshensemble.html">MinHash LSH Ensemble</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../lshforest.html">MinHash LSH Forest</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../minhash.html">MinHash</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../weightedminhash.html">Weighted MinHash</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">datasketch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">datasketch.minhash</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for datasketch.minhash</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">copy</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Generator</span><span class="p">,</span> <span class="n">Iterable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TYPE_CHECKING</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Literal</span>  <span class="c1"># py3.8+; if older, you can fallback to typing_extensions</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">typing_extensions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Literal</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ArrayLike</span>
+
+<span class="c1"># GPU backend</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">cupy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">cp</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">cp</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datasketch.hashfunc</span><span class="w"> </span><span class="kn">import</span> <span class="n">sha1_hash32</span><span class="p">,</span> <span class="n">sha1_hash64</span>
+
+<span class="c1"># The size of a hash value in number of bytes</span>
+<span class="n">hashvalue_byte_size</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">bytes</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span><span class="o">.</span><span class="n">data</span><span class="p">))</span>
+
+<span class="c1"># http://en.wikipedia.org/wiki/Mersenne_prime</span>
+<span class="n">_mersenne_prime</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">61</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">_max_hash</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">32</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">_hash_range</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">32</span>
+
+<span class="c1"># Permutation schemes.</span>
+<span class="c1">#</span>
+<span class="c1"># "affine32" / "affine64" (since 2.0.0): the input hash is pre-mixed once with</span>
+<span class="c1"># the MurmurHash3 finalizer (a fixed bijection), then each permutation applies</span>
+<span class="c1"># phv_k = a_k * h + b_k computed in uint{w}, where the hardware wraparound IS</span>
+<span class="c1"># the modulo 2^w. With a_k odd the map is a bijection on [0, 2^w), so the</span>
+<span class="c1"># permutation step cannot introduce hash collisions -- unlike "legacy", whose</span>
+<span class="c1"># fold from the 61-bit prime range down to 32 bits behaves like a random</span>
+<span class="c1"># function and inflates similarity estimates on large sets.</span>
+<span class="c1"># See https://github.com/ekzhu/datasketch/issues/212.</span>
+<span class="c1">#</span>
+<span class="c1"># a_k * h + b_k mod 2^w is 2-universal but not provably min-wise independent,</span>
+<span class="c1"># so the estimator's accuracy here is empirical, not proven: it rests on the</span>
+<span class="c1"># bijection property (which removes the large-set collision bias above), the</span>
+<span class="c1"># fmix pre-mix (which spreads structured inputs), and the bias/accuracy</span>
+<span class="c1"># benchmarks in benchmark/sketches/ and test/test_minhash_schemes.py.</span>
+<span class="c1">#</span>
+<span class="c1"># "legacy" (the only scheme before 2.0.0): (a * h + b) % mersenne_prime</span>
+<span class="c1"># truncated to 32 bits, stored in uint64. Preserved bit-for-bit so sketches</span>
+<span class="c1"># created by earlier versions keep working.</span>
+<span class="n">_SCHEME_LEGACY</span> <span class="o">=</span> <span class="s2">"legacy"</span>
+<span class="n">_SCHEME_AFFINE32</span> <span class="o">=</span> <span class="s2">"affine32"</span>
+<span class="n">_SCHEME_AFFINE64</span> <span class="o">=</span> <span class="s2">"affine64"</span>
+<span class="n">_VALID_SCHEMES</span> <span class="o">=</span> <span class="p">(</span><span class="n">_SCHEME_AFFINE32</span><span class="p">,</span> <span class="n">_SCHEME_AFFINE64</span><span class="p">,</span> <span class="n">_SCHEME_LEGACY</span><span class="p">)</span>
+
+<span class="c1"># Per-scheme storage dtype and maximum hash value (also the "empty" sentinel).</span>
+<span class="n">_SCHEME_DTYPES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">_SCHEME_LEGACY</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">,</span>
+    <span class="n">_SCHEME_AFFINE32</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">,</span>
+    <span class="n">_SCHEME_AFFINE64</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">_SCHEME_MAX_HASHES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">_SCHEME_LEGACY</span><span class="p">:</span> <span class="n">_max_hash</span><span class="p">,</span>
+    <span class="n">_SCHEME_AFFINE32</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">32</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">),</span>
+    <span class="n">_SCHEME_AFFINE64</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">64</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">),</span>
+<span class="p">}</span>
+<span class="n">_SCHEME_WIDTHS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">_SCHEME_AFFINE32</span><span class="p">:</span> <span class="mi">32</span><span class="p">,</span>
+    <span class="n">_SCHEME_AFFINE64</span><span class="p">:</span> <span class="mi">64</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1"># Scheme codes used in the LeanMinHash and bBitMinHash byte formats. Legacy</span>
+<span class="c1"># payloads have no scheme field (they predate it), so there is no code for</span>
+<span class="c1"># the legacy scheme.</span>
+<span class="n">_SCHEME_CODES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">_SCHEME_AFFINE32</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+    <span class="n">_SCHEME_AFFINE64</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">_SCHEME_CODES_INV</span> <span class="o">=</span> <span class="p">{</span><span class="n">code</span><span class="p">:</span> <span class="n">scheme</span> <span class="k">for</span> <span class="n">scheme</span><span class="p">,</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">_SCHEME_CODES</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+<span class="c1"># MurmurHash3 finalizer constants per width:</span>
+<span class="c1"># (shift1, multiplier1, shift2, multiplier2, shift3).</span>
+<span class="n">_FMIX_CONSTANTS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">32</span><span class="p">:</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">(</span><span class="mi">16</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">(</span><span class="mh">0x85EBCA6B</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">(</span><span class="mi">13</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">(</span><span class="mh">0xC2B2AE35</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">(</span><span class="mi">16</span><span class="p">)),</span>
+    <span class="mi">64</span><span class="p">:</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">(</span><span class="mi">33</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">(</span><span class="mh">0xFF51AFD7ED558CCD</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">(</span><span class="mi">33</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">(</span><span class="mh">0xC4CEB9FE1A85EC53</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">(</span><span class="mi">33</span><span class="p">)),</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_fmix</span><span class="p">(</span><span class="n">hv</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Apply the MurmurHash3 finalizer, a fixed avalanching bijection on</span>
+<span class="sd">    [0, 2^width).</span>
+
+<span class="sd">    Used as a one-shot pre-mix so that structured or weakly hashed inputs</span>
+<span class="sd">    (e.g. sequential integers with an identity hash function) are safe to</span>
+<span class="sd">    feed to the affine permutations. Operates element-wise on numpy or cupy</span>
+<span class="sd">    unsigned integer arrays; multiplication wraps around, which is the</span>
+<span class="sd">    intended modulo 2^width arithmetic.</span>
+
+<span class="sd">    """</span>
+    <span class="n">s1</span><span class="p">,</span> <span class="n">m1</span><span class="p">,</span> <span class="n">s2</span><span class="p">,</span> <span class="n">m2</span><span class="p">,</span> <span class="n">s3</span> <span class="o">=</span> <span class="n">_FMIX_CONSTANTS</span><span class="p">[</span><span class="n">width</span><span class="p">]</span>
+    <span class="n">hv</span> <span class="o">=</span> <span class="n">hv</span> <span class="o">^</span> <span class="p">(</span><span class="n">hv</span> <span class="o">&gt;&gt;</span> <span class="n">s1</span><span class="p">)</span>
+    <span class="n">hv</span> <span class="o">=</span> <span class="n">hv</span> <span class="o">*</span> <span class="n">m1</span>
+    <span class="n">hv</span> <span class="o">=</span> <span class="n">hv</span> <span class="o">^</span> <span class="p">(</span><span class="n">hv</span> <span class="o">&gt;&gt;</span> <span class="n">s2</span><span class="p">)</span>
+    <span class="n">hv</span> <span class="o">=</span> <span class="n">hv</span> <span class="o">*</span> <span class="n">m2</span>
+    <span class="k">return</span> <span class="n">hv</span> <span class="o">^</span> <span class="p">(</span><span class="n">hv</span> <span class="o">&gt;&gt;</span> <span class="n">s3</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_check_scheme_consistency</span><span class="p">(</span><span class="n">known</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">minhash</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Check the permutation scheme of a MinHash given to an LSH index</span>
+<span class="sd">    against the scheme of the MinHash previously given to it, and return</span>
+<span class="sd">    the scheme the index should remember.</span>
+
+<span class="sd">    Hash values carry no trace of the scheme that produced them, so mixing</span>
+<span class="sd">    schemes in one index silently returns wrong results instead of failing;</span>
+<span class="sd">    this check makes it fail. Sketch types without a scheme attribute</span>
+<span class="sd">    (WeightedMinHash) are exempt.</span>
+<span class="sd">    """</span>
+    <span class="n">scheme</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">minhash</span><span class="p">,</span> <span class="s2">"scheme"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">scheme</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">known</span>
+    <span class="k">if</span> <span class="n">known</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">scheme</span>
+    <span class="k">if</span> <span class="n">scheme</span> <span class="o">!=</span> <span class="n">known</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">"MinHash scheme </span><span class="si">%r</span><span class="s2"> does not match scheme </span><span class="si">%r</span><span class="s2"> of the MinHash previously given to this index"</span> <span class="o">%</span> <span class="p">(</span><span class="n">scheme</span><span class="p">,</span> <span class="n">known</span><span class="p">)</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">known</span>
+
+
+<span class="n">_GPU_OK_CACHE</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_gpu_available</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">global</span> <span class="n">_GPU_OK_CACHE</span>
+    <span class="k">if</span> <span class="n">cp</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">_GPU_OK_CACHE</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_GPU_OK_CACHE</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_GPU_OK_CACHE</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">runtime</span><span class="o">.</span><span class="n">getDeviceCount</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">0</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">_GPU_OK_CACHE</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">_GPU_OK_CACHE</span>
+
+
+<div class="viewcode-block" id="MinHash">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MinHash</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""MinHash is a probabilistic data structure for computing</span>
+<span class="sd">    `Jaccard similarity`_ between sets.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        num_perm (int): Number of random permutation functions.</span>
+<span class="sd">            It will be ignored if `hashvalues` is not None.</span>
+<span class="sd">        seed (int): The random seed controls the set of random</span>
+<span class="sd">            permutation functions generated for this MinHash.</span>
+<span class="sd">        gpu_mode : {'disable', 'detect', 'always'}, default 'disable'</span>
+<span class="sd">            Controls GPU use in :meth:`update_batch`.</span>
+
+<span class="sd">            - ``'disable'`` — always CPU.</span>
+<span class="sd">            - ``'detect'`` — use GPU if available, otherwise CPU.</span>
+<span class="sd">            - ``'always'`` — require GPU; raise ``RuntimeError`` if CuPy/CUDA</span>
+<span class="sd">            is unavailable.</span>
+<span class="sd">        hashfunc (Optional[Callable]): The hash function used by</span>
+<span class="sd">            this MinHash.</span>
+<span class="sd">            It takes the input passed to the :meth:`update` method and</span>
+<span class="sd">            returns an integer that can be encoded with 32 bits for the</span>
+<span class="sd">            "affine32" and "legacy" schemes, or with 64 bits for the</span>
+<span class="sd">            "affine64" scheme.</span>
+<span class="sd">            If None (default), a SHA1-based hash function matching the</span>
+<span class="sd">            scheme width is used (:func:`datasketch.hashfunc.sha1_hash32`</span>
+<span class="sd">            or :func:`datasketch.hashfunc.sha1_hash64`).</span>
+<span class="sd">            Users can use `farmhash` for better performance.</span>
+<span class="sd">            See the example in :meth:`update`.</span>
+<span class="sd">        hashobj (**deprecated**): This argument is deprecated since version</span>
+<span class="sd">            1.4.0. It is a no-op and has been replaced by `hashfunc`.</span>
+<span class="sd">        hashvalues (Optional[Iterable]): The hash values is</span>
+<span class="sd">            the internal state of the MinHash. It can be specified for faster</span>
+<span class="sd">            initialization using the existing :attr:`hashvalues` of another</span>
+<span class="sd">            MinHash. `scheme` must then be specified explicitly, because hash</span>
+<span class="sd">            values carry no trace of the scheme that produced them.</span>
+<span class="sd">        permutations (Optional[Tuple[Iterable, Iterable]]): The permutation</span>
+<span class="sd">            function parameters as a tuple of two lists. This argument</span>
+<span class="sd">            can be specified for faster initialization using the existing</span>
+<span class="sd">            :attr:`permutations` from another MinHash. `scheme` must then be</span>
+<span class="sd">            specified explicitly.</span>
+<span class="sd">        scheme (Optional[str]): The permutation scheme: one of ``"affine32"``,</span>
+<span class="sd">            ``"affine64"``, and ``"legacy"``. If None (the default), the</span>
+<span class="sd">            scheme is ``"affine32"``; however, when `hashvalues` or</span>
+<span class="sd">            `permutations` are given, the scheme of the MinHash they came</span>
+<span class="sd">            from must be passed explicitly (``"legacy"`` for values created</span>
+<span class="sd">            by datasketch before 2.0.0).</span>
+
+<span class="sd">            - ``"affine32"`` — the input hash is pre-mixed once with the</span>
+<span class="sd">              32-bit MurmurHash3 finalizer, then permuted with</span>
+<span class="sd">              ``a * h + b mod 2^32`` (``a`` odd, a bijection). Hash values</span>
+<span class="sd">              are stored as uint32, halving memory use compared to</span>
+<span class="sd">              ``"legacy"``, and the permutation step is collision-free.</span>
+<span class="sd">            - ``"affine64"`` — same construction over 64-bit hash values,</span>
+<span class="sd">              for very large sets (roughly 100 million elements or more)</span>
+<span class="sd">              where any 32-bit input hash saturates and inflates similarity</span>
+<span class="sd">              estimates regardless of the permutation scheme.</span>
+<span class="sd">            - ``"legacy"`` — the scheme used before version 2.0.0, kept for</span>
+<span class="sd">              compatibility with existing serialized sketches. It is biased</span>
+<span class="sd">              on large sets and slower; do not use it for new data.</span>
+
+<span class="sd">            MinHash created with different schemes cannot be compared,</span>
+<span class="sd">            merged, or unioned.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        Hashing and permutation *generation* always run on CPU to preserve</span>
+<span class="sd">        existing semantics; only the permutation application and the</span>
+<span class="sd">        columnwise min-reduction inside :meth:`update_batch` may run on GPU.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        To save memory usage, consider using :class:`datasketch.LeanMinHash`.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        Since version 1.1.1, MinHash will only support serialization using</span>
+<span class="sd">        pickle_. ``serialize`` and ``deserialize`` methods are removed,</span>
+<span class="sd">        and are supported in :class:`datasketch.LeanMinHash` instead.</span>
+<span class="sd">        MinHash serialized before version 1.1.1 cannot be deserialized properly</span>
+<span class="sd">        in newer versions (`need to migrate? &lt;https://github.com/ekzhu/datasketch/issues/18&gt;`_).</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        Since version 1.1.3, MinHash uses Numpy's random number generator</span>
+<span class="sd">        instead of Python's built-in random package. This change makes the</span>
+<span class="sd">        hash values consistent across different Python versions.</span>
+<span class="sd">        The side-effect is that now MinHash created before version 1.1.3 won't</span>
+<span class="sd">        work (i.e., :meth:`jaccard`, :meth:`merge` and :meth:`union`)</span>
+<span class="sd">        with those created after.</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        Since version 2.0.0, the default permutation scheme is ``"affine32"``,</span>
+<span class="sd">        which produces different hash values than earlier versions. MinHash</span>
+<span class="sd">        pickled by earlier versions deserializes with ``scheme="legacy"`` and</span>
+<span class="sd">        keeps working, but new MinHash interoperates with it only when</span>
+<span class="sd">        created with ``scheme="legacy"`` explicitly. Any persisted LSH index</span>
+<span class="sd">        must be rebuilt with sketches of a single scheme.</span>
+
+<span class="sd">    .. _`Jaccard similarity`: https://en.wikipedia.org/wiki/Jaccard_index</span>
+<span class="sd">    .. _hashlib: https://docs.python.org/3.5/library/hashlib.html</span>
+<span class="sd">    .. _`pickle`: https://docs.python.org/3/library/pickle.html</span>
+
+<span class="sd">    """</span>
+
+<div class="viewcode-block" id="MinHash.__init__">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">num_perm</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">128</span><span class="p">,</span>
+        <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="n">gpu_mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"disable"</span><span class="p">,</span> <span class="s2">"detect"</span><span class="p">,</span> <span class="s2">"always"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"disable"</span><span class="p">,</span>
+        <span class="n">hashfunc</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Callable</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">hashobj</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># Deprecated.</span>
+        <span class="n">hashvalues</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">ArrayLike</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">permutations</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="n">ArrayLike</span><span class="p">,</span> <span class="n">ArrayLike</span><span class="p">],</span> <span class="n">ArrayLike</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">scheme</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">"affine32"</span><span class="p">,</span> <span class="s2">"affine64"</span><span class="p">,</span> <span class="s2">"legacy"</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">scheme</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Hash values and permutation parameters carry no trace of the</span>
+            <span class="c1"># scheme that produced them (e.g. legacy values fit the affine32</span>
+            <span class="c1"># range), so a default here would silently mislabel pre-2.0.0</span>
+            <span class="c1"># state and defeat the cross-scheme comparison guards.</span>
+            <span class="k">if</span> <span class="n">hashvalues</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">permutations</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">"scheme must be specified explicitly when initializing from existing "</span>
+                    <span class="s2">"hash values or permutations: pass the scheme of the MinHash they came "</span>
+                    <span class="s2">"from, or scheme='legacy' for values created by datasketch before 2.0.0."</span>
+                <span class="p">)</span>
+            <span class="n">scheme</span> <span class="o">=</span> <span class="n">_SCHEME_AFFINE32</span>
+        <span class="k">elif</span> <span class="n">scheme</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_VALID_SCHEMES</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"scheme must be one of </span><span class="si">%s</span><span class="s2">, got </span><span class="si">%r</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">_VALID_SCHEMES</span><span class="p">),</span> <span class="n">scheme</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">=</span> <span class="n">scheme</span>
+        <span class="k">if</span> <span class="n">hashvalues</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">num_perm</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">hashvalues</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">num_perm</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"num_perm must be positive"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">num_perm</span> <span class="o">&gt;</span> <span class="n">_hash_range</span><span class="p">:</span>
+            <span class="c1"># Because 1) we don't want the size to be too large, and</span>
+            <span class="c1"># 2) we are using 4 bytes to store the size value</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"Cannot have more than </span><span class="si">%d</span><span class="s2"> number of permutation functions"</span>
+                <span class="o">%</span> <span class="n">_hash_range</span>
+            <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">seed</span> <span class="o">=</span> <span class="n">seed</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_perm</span> <span class="o">=</span> <span class="n">num_perm</span>
+        <span class="c1"># Check the hash function.</span>
+        <span class="k">if</span> <span class="n">hashfunc</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">hashfunc</span> <span class="o">=</span> <span class="n">sha1_hash64</span> <span class="k">if</span> <span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_AFFINE64</span> <span class="k">else</span> <span class="n">sha1_hash32</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">callable</span><span class="p">(</span><span class="n">hashfunc</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"The hashfunc must be a callable."</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hashfunc</span> <span class="o">=</span> <span class="n">hashfunc</span>
+        <span class="c1"># Check for use of hashobj and issue warning.</span>
+        <span class="k">if</span> <span class="n">hashobj</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">"hashobj is deprecated, use hashfunc instead."</span><span class="p">,</span> <span class="ne">DeprecationWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="c1"># Initialize hash values</span>
+        <span class="k">if</span> <span class="n">hashvalues</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_hashvalues</span><span class="p">(</span><span class="n">hashvalues</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_init_hashvalues</span><span class="p">(</span><span class="n">num_perm</span><span class="p">)</span>
+        <span class="c1"># Initalize permutation function parameters</span>
+        <span class="k">if</span> <span class="n">permutations</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">permutations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_permutations</span><span class="p">(</span><span class="n">permutations</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">permutations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_init_permutations</span><span class="p">(</span><span class="n">num_perm</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">permutations</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"Numbers of hash values and permutations mismatch"</span><span class="p">)</span>
+
+        <span class="c1"># GPU state</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_gpu_mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"disable"</span><span class="p">,</span> <span class="s2">"detect"</span><span class="p">,</span> <span class="s2">"always"</span><span class="p">]</span> <span class="o">=</span> <span class="n">gpu_mode</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_a_gpu</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_b_gpu</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_gpu_caches</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Cache permutation arrays on device. Call only when GPU is available."""</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_a_gpu</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_b_gpu</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">permutations</span>
+            <span class="n">dtype</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">uint32</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_AFFINE32</span> <span class="k">else</span> <span class="n">cp</span><span class="o">.</span><span class="n">uint64</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_a_gpu</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_b_gpu</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_hashvalues</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_perm</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_LEGACY</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">num_perm</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">)</span> <span class="o">*</span> <span class="n">_max_hash</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="n">num_perm</span><span class="p">,</span> <span class="n">_SCHEME_MAX_HASHES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_SCHEME_DTYPES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_init_permutations</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_perm</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+        <span class="n">gen</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">RandomState</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">seed</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_LEGACY</span><span class="p">:</span>
+            <span class="c1"># Create parameters for a random bijective permutation function</span>
+            <span class="c1"># that maps a 32-bit hash value to another 32-bit hash value.</span>
+            <span class="c1"># http://en.wikipedia.org/wiki/Universal_hashing</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+                <span class="p">[</span>
+                    <span class="p">(</span>
+                        <span class="n">gen</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">_mersenne_prime</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">),</span>
+                        <span class="n">gen</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">_mersenne_prime</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">),</span>
+                    <span class="p">)</span>
+                    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_perm</span><span class="p">)</span>
+                <span class="p">],</span>
+                <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">,</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">T</span>
+        <span class="c1"># Affine permutations h -&gt; a * h + b mod 2^width. An odd `a` makes the</span>
+        <span class="c1"># map bijective: a collision requires 2^width to divide a * (h1 - h2),</span>
+        <span class="c1"># and an odd `a` contributes no factors of two. (An even `a` would</span>
+        <span class="c1"># collapse the value range instead.)</span>
+        <span class="n">width</span> <span class="o">=</span> <span class="n">_SCHEME_WIDTHS</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">]</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">_SCHEME_DTYPES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">]</span>
+        <span class="n">a</span> <span class="o">=</span> <span class="n">gen</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="p">(</span><span class="n">width</span> <span class="o">-</span> <span class="mi">1</span><span class="p">),</span> <span class="n">num_perm</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span> <span class="o">*</span> <span class="n">dtype</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="o">+</span> <span class="n">dtype</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">b</span> <span class="o">=</span> <span class="n">gen</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">width</span><span class="p">,</span> <span class="n">num_perm</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">])</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_to_scheme_array</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">what</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Convert values to an array of the scheme's dtype without loss.</span>
+
+<span class="sd">        Sequences of Python ints are converted with an explicit dtype: dtype</span>
+<span class="sd">        inference would pick float64 when values above 2^63 are mixed with</span>
+<span class="sd">        smaller ones, silently rounding 64-bit hash values.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">values</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="n">values</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">kind</span> <span class="ow">in</span> <span class="s2">"iu"</span>
+                <span class="ow">and</span> <span class="n">values</span><span class="o">.</span><span class="n">size</span>
+                <span class="ow">and</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">max</span><span class="p">())</span> <span class="o">&gt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">_SCHEME_MAX_HASHES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span> <span class="ow">or</span> <span class="nb">int</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">min</span><span class="p">())</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"</span><span class="si">%s</span><span class="s2"> out of range for scheme </span><span class="si">%r</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">what</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">))</span>
+            <span class="k">return</span> <span class="n">values</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">_SCHEME_DTYPES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">values</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_SCHEME_DTYPES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span>
+        <span class="k">except</span> <span class="ne">OverflowError</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"</span><span class="si">%s</span><span class="s2"> out of range for scheme </span><span class="si">%r</span><span class="s2">: </span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">what</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">,</span> <span class="n">err</span><span class="p">))</span> <span class="kn">from</span><span class="w"> </span><span class="nn">err</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_parse_hashvalues</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hashvalues</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_LEGACY</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">hashvalues</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_to_scheme_array</span><span class="p">(</span><span class="n">hashvalues</span><span class="p">,</span> <span class="s2">"hash values"</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_parse_permutations</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">permutations</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_LEGACY</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">permutations</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">_SCHEME_DTYPES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">]</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="nb">isinstance</span><span class="p">(</span><span class="n">permutations</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="n">permutations</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="n">dtype</span>
+            <span class="ow">and</span> <span class="n">permutations</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">2</span>
+            <span class="ow">and</span> <span class="n">permutations</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="mi">2</span>
+        <span class="p">):</span>
+            <span class="c1"># Already in canonical form (e.g. from copy()/union()/bulk()):</span>
+            <span class="c1"># share the array across sketches like the legacy scheme does,</span>
+            <span class="c1"># instead of duplicating ~2 * num_perm values per sketch.</span>
+            <span class="n">parsed</span> <span class="o">=</span> <span class="n">permutations</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_to_scheme_array</span><span class="p">(</span><span class="n">permutations</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">"permutation parameters"</span><span class="p">)</span>
+            <span class="n">b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_to_scheme_array</span><span class="p">(</span><span class="n">permutations</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s2">"permutation parameters"</span><span class="p">)</span>
+            <span class="n">parsed</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">parsed</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&amp;</span> <span class="n">dtype</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"all `a` permutation parameters must be odd for scheme </span><span class="si">%r</span><span class="s2">"</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">parsed</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_hash_input_array</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hvs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Convert hash function outputs to an array of the scheme's dtype,</span>
+<span class="sd">        with a helpful error if a value does not fit the scheme width.</span>
+<span class="sd">        """</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">hvs</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_SCHEME_DTYPES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span>
+        <span class="k">except</span> <span class="ne">OverflowError</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"hashfunc returned a value out of range for scheme </span><span class="si">%r</span><span class="s2">: </span><span class="si">%s</span><span class="s2">. "</span>
+                <span class="s2">"Use a hash function matching the scheme width, or scheme='affine64' "</span>
+                <span class="s2">"for 64-bit hash values."</span> <span class="o">%</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">,</span> <span class="n">err</span><span class="p">)</span>
+            <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">err</span>
+
+<div class="viewcode-block" id="MinHash.update">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.update">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Update this MinHash with a new value.</span>
+<span class="sd">        The value will be hashed using the hash function specified by</span>
+<span class="sd">        the `hashfunc` argument in the constructor.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            b: The value to be hashed using the hash function specified.</span>
+
+<span class="sd">        Example:</span>
+<span class="sd">            To update with a new string value (using the default SHA1 hash</span>
+<span class="sd">            function, which requires bytes as input):</span>
+
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                minhash = Minhash()</span>
+<span class="sd">                minhash.update("new value".encode("utf-8"))</span>
+
+<span class="sd">            We can also use a different hash function, for example, `pyfarmhash`:</span>
+
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                import farmhash</span>
+
+
+<span class="sd">                def _hash_32(b):</span>
+<span class="sd">                    return farmhash.hash32(b)</span>
+
+
+<span class="sd">                minhash = MinHash(hashfunc=_hash_32)</span>
+<span class="sd">                minhash.update("new value")</span>
+
+<span class="sd">        """</span>
+        <span class="n">hv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hashfunc</span><span class="p">(</span><span class="n">b</span><span class="p">)</span>
+        <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">permutations</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_LEGACY</span><span class="p">:</span>
+            <span class="n">phv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">bitwise_and</span><span class="p">((</span><span class="n">a</span> <span class="o">*</span> <span class="n">hv</span> <span class="o">+</span> <span class="n">b</span><span class="p">)</span> <span class="o">%</span> <span class="n">_mersenne_prime</span><span class="p">,</span> <span class="n">_max_hash</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># A 1-element array rather than a scalar: numpy warns on scalar</span>
+            <span class="c1"># overflow, while array arithmetic wraps silently as intended.</span>
+            <span class="n">hv</span> <span class="o">=</span> <span class="n">_fmix</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hash_input_array</span><span class="p">([</span><span class="n">hv</span><span class="p">]),</span> <span class="n">_SCHEME_WIDTHS</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span>
+            <span class="n">phv</span> <span class="o">=</span> <span class="n">a</span> <span class="o">*</span> <span class="n">hv</span> <span class="o">+</span> <span class="n">b</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span><span class="n">phv</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MinHash.update_batch">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.update_batch">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update_batch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Update this MinHash with new values.</span>
+<span class="sd">        The values will be hashed using the hash function specified by</span>
+<span class="sd">        the `hashfunc` argument in the constructor.</span>
+
+<span class="sd">        Notes:</span>
+<span class="sd">            - Hashing of input values always runs on CPU.</span>
+<span class="sd">            - Permutation application + min-reduction may run on GPU</span>
+<span class="sd">            depending on `gpu_mode`:</span>
+<span class="sd">                'disable' : CPU</span>
+<span class="sd">                'detect'  : GPU if available else CPU</span>
+<span class="sd">                'always'  : GPU (error if unavailable)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            b (Iterable): Values to be hashed using the hash function specified.</span>
+
+<span class="sd">        Examples:</span>
+<span class="sd">            Basic usage with string values (default SHA1 hash, requires bytes):</span>
+
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                from datasketch import MinHash</span>
+
+<span class="sd">                m = MinHash()</span>
+<span class="sd">                m.update_batch([s.encode("utf-8") for s in ["token1", "token2"]])</span>
+
+<span class="sd">            Using GPU mode if available:</span>
+
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                from datasketch import MinHash</span>
+
+<span class="sd">                m = MinHash(num_perm=256, gpu_mode="detect")</span>
+<span class="sd">                m.update_batch([b"token1", b"token2"])</span>
+
+<span class="sd">        """</span>
+        <span class="c1"># Hash on CPU to preserve hashfunc semantics</span>
+        <span class="n">hv_list</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">hashfunc</span><span class="p">(</span><span class="n">_b</span><span class="p">)</span> <span class="k">for</span> <span class="n">_b</span> <span class="ow">in</span> <span class="n">b</span><span class="p">]</span>
+        <span class="c1"># Optimization: empty batch is a no-op (preserves original behavior)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">hv_list</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">permutations</span>
+
+        <span class="c1"># Decide backend</span>
+        <span class="n">use_gpu</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gpu_mode</span> <span class="o">==</span> <span class="s2">"always"</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">_gpu_available</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">"GPU mode 'always' requested but CuPy/CUDA device is unavailable."</span><span class="p">)</span>
+            <span class="n">use_gpu</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gpu_mode</span> <span class="o">==</span> <span class="s2">"detect"</span><span class="p">:</span>
+            <span class="n">use_gpu</span> <span class="o">=</span> <span class="n">_gpu_available</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># 'disable'</span>
+            <span class="n">use_gpu</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="k">if</span> <span class="n">use_gpu</span><span class="p">:</span>
+            <span class="c1"># GPU path (keep indentation minimal as requested)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_gpu_caches</span><span class="p">()</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_LEGACY</span><span class="p">:</span>
+                <span class="n">hv_gpu</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">hv_list</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">cp</span><span class="o">.</span><span class="n">uint64</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="n">phv_gpu</span> <span class="o">=</span> <span class="p">(</span><span class="n">hv_gpu</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_a_gpu</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_b_gpu</span><span class="p">)</span> <span class="o">%</span> <span class="n">cp</span><span class="o">.</span><span class="n">uint64</span><span class="p">(</span><span class="n">_mersenne_prime</span><span class="p">)</span>
+                <span class="n">phv_gpu</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">bitwise_and</span><span class="p">(</span><span class="n">phv_gpu</span><span class="p">,</span> <span class="n">cp</span><span class="o">.</span><span class="n">uint64</span><span class="p">(</span><span class="n">_max_hash</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Validate and convert on CPU, then transfer to device.</span>
+                <span class="n">hv_gpu</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_hash_input_array</span><span class="p">(</span><span class="n">hv_list</span><span class="p">))</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="n">hv_gpu</span> <span class="o">=</span> <span class="n">_fmix</span><span class="p">(</span><span class="n">hv_gpu</span><span class="p">,</span> <span class="n">_SCHEME_WIDTHS</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span>
+                <span class="n">phv_gpu</span> <span class="o">=</span> <span class="n">hv_gpu</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_a_gpu</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_b_gpu</span>
+            <span class="n">base_gpu</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">)</span>
+            <span class="c1"># column-wise min without extra vstack</span>
+            <span class="n">col_min</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span><span class="n">base_gpu</span><span class="p">,</span> <span class="n">cp</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">phv_gpu</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">(</span><span class="n">col_min</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">_SCHEME_DTYPES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">],</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="c1"># CPU path</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">_SCHEME_LEGACY</span><span class="p">:</span>
+            <span class="n">hv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">hv_list</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint64</span><span class="p">,</span> <span class="n">ndmin</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+            <span class="n">phv</span> <span class="o">=</span> <span class="p">(</span><span class="n">hv</span> <span class="o">*</span> <span class="n">a</span> <span class="o">+</span> <span class="n">b</span><span class="p">)</span> <span class="o">%</span> <span class="n">_mersenne_prime</span>
+            <span class="n">phv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">bitwise_and</span><span class="p">(</span><span class="n">phv</span><span class="p">,</span> <span class="n">_max_hash</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">hv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_hash_input_array</span><span class="p">(</span><span class="n">hv_list</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">hv</span> <span class="o">=</span> <span class="n">_fmix</span><span class="p">(</span><span class="n">hv</span><span class="p">,</span> <span class="n">_SCHEME_WIDTHS</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span>
+            <span class="n">phv</span> <span class="o">=</span> <span class="n">hv</span> <span class="o">*</span> <span class="n">a</span> <span class="o">+</span> <span class="n">b</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">,</span> <span class="n">phv</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="MinHash.jaccard">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.jaccard">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">jaccard</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">MinHash</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Estimate the `Jaccard similarity`_ (resemblance) between the sets</span>
+<span class="sd">        represented by this MinHash and the other.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            other (MinHash): The other MinHash.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            float: The Jaccard similarity, which is between 0.0 and 1.0.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If the two MinHashes have different numbers of</span>
+<span class="sd">                permutation functions, different seeds, or different</span>
+<span class="sd">                permutation schemes.</span>
+
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="s2">"scheme"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"Cannot compute Jaccard given MinHash with different permutation schemes"</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="n">other</span><span class="o">.</span><span class="n">seed</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">seed</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"Cannot compute Jaccard given MinHash with different seeds"</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">other</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"Cannot compute Jaccard given MinHash with different numbers of permutation functions"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">count_nonzero</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">))</span> <span class="o">/</span> <span class="nb">float</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="MinHash.count">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.count">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">count</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Estimate the cardinality count based on the technique described in</span>
+<span class="sd">        `this paper &lt;http://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=365694&gt;`_.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            int: The estimated cardinality of the set represented by this MinHash.</span>
+
+<span class="sd">        """</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">/</span> <span class="nb">float</span><span class="p">(</span><span class="n">_SCHEME_MAX_HASHES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">]))</span> <span class="o">-</span> <span class="mf">1.0</span></div>
+
+
+<div class="viewcode-block" id="MinHash.merge">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.merge">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">merge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">MinHash</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Merge the other MinHash with this one, making this one the union</span>
+<span class="sd">        of both.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            other (MinHash): The other MinHash.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If the two MinHashes have different numbers of</span>
+<span class="sd">                permutation functions, different seeds, or different</span>
+<span class="sd">                permutation schemes.</span>
+
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="s2">"scheme"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"Cannot merge MinHash with different permutation schemes"</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="n">other</span><span class="o">.</span><span class="n">seed</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">seed</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"Cannot merge MinHash with different seeds"</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">other</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"Cannot merge MinHash with different numbers of permutation functions"</span>
+            <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span><span class="n">other</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MinHash.digest">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.digest">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">digest</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Export the hash values, which is the internal state of the</span>
+<span class="sd">        MinHash.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            numpy.ndarray: The hash values which is a Numpy array.</span>
+
+<span class="sd">        """</span>
+        <span class="k">return</span> <span class="n">copy</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MinHash.is_empty">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.is_empty">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">is_empty</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Returns:</span>
+<span class="sd">        bool: If the current MinHash is empty - at the state of just</span>
+<span class="sd">            initialized.</span>
+
+<span class="sd">        """</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">!=</span> <span class="n">_SCHEME_MAX_HASHES</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">])</span></div>
+
+
+<div class="viewcode-block" id="MinHash.clear">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.clear">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">clear</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Clear the current state of the MinHash.</span>
+<span class="sd">        All hash values are reset.</span>
+<span class="sd">        """</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_init_hashvalues</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="MinHash.copy">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.copy">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MinHash</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Return a copy; preserves gpu_mode (rehydrates caches lazily)."""</span>
+        <span class="k">return</span> <span class="n">MinHash</span><span class="p">(</span>
+            <span class="n">seed</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">seed</span><span class="p">,</span>
+            <span class="n">hashfunc</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">hashfunc</span><span class="p">,</span>
+            <span class="n">hashvalues</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">digest</span><span class="p">(),</span>
+            <span class="n">permutations</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">permutations</span><span class="p">,</span>
+            <span class="n">gpu_mode</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_gpu_mode</span><span class="p">,</span>
+            <span class="n">scheme</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">scheme</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MinHash.__len__">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.__len__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Returns:</span>
+<span class="sd">        int: The number of hash values.</span>
+
+<span class="sd">        """</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MinHash.__eq__">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.__eq__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__eq__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">MinHash</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Returns:</span>
+<span class="sd">        bool: If their schemes, seeds and hash values are all equal then two are equivalent.</span>
+
+<span class="sd">        """</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="ow">is</span> <span class="nb">type</span><span class="p">(</span><span class="n">other</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheme</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">scheme</span>
+            <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">seed</span> <span class="o">==</span> <span class="n">other</span><span class="o">.</span><span class="n">seed</span>
+            <span class="ow">and</span> <span class="n">np</span><span class="o">.</span><span class="n">array_equal</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">hashvalues</span><span class="p">)</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MinHash.union">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.union">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">union</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">mhs</span><span class="p">:</span> <span class="n">MinHash</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MinHash</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">"""Create a MinHash which is the union of the MinHash objects passed as arguments.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            *mhs (MinHash): The MinHash objects to be united. The argument list length is variable,</span>
+<span class="sd">                but must be at least 2.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            MinHash: a new union MinHash.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If the number of MinHash objects passed as arguments is less than 2,</span>
+<span class="sd">                or if the MinHash objects passed as arguments have different seeds,</span>
+<span class="sd">                different numbers of permutation functions, or different</span>
+<span class="sd">                permutation schemes.</span>
+
+<span class="sd">        Example:</span>
+
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                from datasketch import MinHash</span>
+<span class="sd">                import numpy as np</span>
+
+<span class="sd">                m1 = MinHash(num_perm=128)</span>
+<span class="sd">                m1.update_batch(np.random.randint(low=0, high=30, size=10))</span>
+
+<span class="sd">                m2 = MinHash(num_perm=128)</span>
+<span class="sd">                m2.update_batch(np.random.randint(low=0, high=30, size=10))</span>
+
+<span class="sd">                # Union m1 and m2.</span>
+<span class="sd">                m = MinHash.union(m1, m2)</span>
+
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">mhs</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"Cannot union less than 2 MinHash"</span><span class="p">)</span>
+        <span class="n">num_perm</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">mhs</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">seed</span> <span class="o">=</span> <span class="n">mhs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">seed</span>
+        <span class="n">scheme</span> <span class="o">=</span> <span class="n">mhs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">scheme</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">((</span><span class="n">seed</span> <span class="o">!=</span> <span class="n">m</span><span class="o">.</span><span class="n">seed</span> <span class="ow">or</span> <span class="n">num_perm</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">m</span><span class="p">)</span> <span class="ow">or</span> <span class="n">scheme</span> <span class="o">!=</span> <span class="n">m</span><span class="o">.</span><span class="n">scheme</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">mhs</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">"The unioning MinHash must have the same seed, number of permutation functions and scheme"</span>
+            <span class="p">)</span>
+        <span class="n">hashvalues</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="o">.</span><span class="n">reduce</span><span class="p">([</span><span class="n">m</span><span class="o">.</span><span class="n">hashvalues</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">mhs</span><span class="p">])</span>
+        <span class="n">permutations</span> <span class="o">=</span> <span class="n">mhs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">permutations</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span>
+            <span class="n">num_perm</span><span class="o">=</span><span class="n">num_perm</span><span class="p">,</span>
+            <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">,</span>
+            <span class="n">hashfunc</span><span class="o">=</span><span class="n">mhs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">hashfunc</span><span class="p">,</span>
+            <span class="n">hashvalues</span><span class="o">=</span><span class="n">hashvalues</span><span class="p">,</span>
+            <span class="n">permutations</span><span class="o">=</span><span class="n">permutations</span><span class="p">,</span>
+            <span class="n">gpu_mode</span><span class="o">=</span><span class="n">mhs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">_gpu_mode</span><span class="p">,</span>
+            <span class="n">scheme</span><span class="o">=</span><span class="n">scheme</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MinHash.bulk">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.bulk">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">bulk</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">,</span> <span class="o">**</span><span class="n">minhash_kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">MinHash</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">"""Compute MinHashes in bulk. This method avoids unnecessary</span>
+<span class="sd">        overhead when initializing many minhashes by reusing the initialized</span>
+<span class="sd">        state.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            b (Iterable): An Iterable of lists of bytes, each list is</span>
+<span class="sd">                hashed in to one MinHash in the output.</span>
+<span class="sd">            **minhash_kwargs: Keyword arguments used to initialize MinHash,</span>
+<span class="sd">                will be used for all minhashes.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            list[datasketch.MinHash]: A list of computed MinHashes.</span>
+
+<span class="sd">        Example:</span>
+
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                from datasketch import MinHash</span>
+
+<span class="sd">                data = [[b"token1", b"token2", b"token3"], [b"token4", b"token5", b"token6"]]</span>
+<span class="sd">                minhashes = MinHash.bulk(data, num_perm=64)</span>
+
+<span class="sd">        """</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">generator</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="o">**</span><span class="n">minhash_kwargs</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="MinHash.generator">
+<a class="viewcode-back" href="../../documentation.html#datasketch.MinHash.generator">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generator</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">,</span> <span class="o">**</span><span class="n">minhash_kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Generator</span><span class="p">[</span><span class="n">MinHash</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">"""Compute MinHashes in a generator. This method avoids unnecessary</span>
+<span class="sd">        overhead when initializing many minhashes by reusing the initialized</span>
+<span class="sd">        state.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            b (Iterable): An Iterable of lists of bytes, each list is</span>
+<span class="sd">                hashed in to one MinHash in the output.</span>
+<span class="sd">            minhash_kwargs: Keyword arguments used to initialize MinHash,</span>
+<span class="sd">                will be used for all minhashes.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Generator[MinHash, None, None]: a generator of computed MinHashes.</span>
+
+<span class="sd">        Example:</span>
+
+<span class="sd">            .. code-block:: python</span>
+
+<span class="sd">                from datasketch import MinHash</span>
+
+<span class="sd">                data = [[b"token1", b"token2", b"token3"], [b"token4", b"token5", b"token6"]]</span>
+<span class="sd">                for minhash in MinHash.generator(data, num_perm=64):</span>
+<span class="sd">                    # do something useful</span>
+<span class="sd">                    minhash</span>
+
+<span class="sd">        """</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">(</span><span class="o">**</span><span class="n">minhash_kwargs</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">_b</span> <span class="ow">in</span> <span class="n">b</span><span class="p">:</span>
+            <span class="n">_m</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+            <span class="n">_m</span><span class="o">.</span><span class="n">update_batch</span><span class="p">(</span><span class="n">_b</span><span class="p">)</span>
+            <span class="k">yield</span> <span class="n">_m</span></div>
+
+
+    <span class="c1"># NOTE:</span>
+    <span class="c1"># CuPy device arrays (`_a_gpu`, `_b_gpu`) are not reliably picklable across</span>
+    <span class="c1"># environments and can inflate pickle size or fail on machines without CUDA.</span>
+    <span class="c1"># We therefore drop device state on pickle so round-tripped MinHash objects</span>
+    <span class="c1"># remain portable; callers can still use `gpu_mode="detect"` to re-enable GPU.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">__getstate__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="c1"># Drop device arrays; keep gpu_mode as-is (portable across envs).</span>
+        <span class="n">state</span><span class="p">[</span><span class="s2">"_a_gpu"</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">state</span><span class="p">[</span><span class="s2">"_b_gpu"</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">state</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__setstate__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">):</span>
+        <span class="c1"># MinHash pickled before version 2.0.0 predates permutation schemes</span>
+        <span class="c1"># and always used the legacy scheme.</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">"scheme"</span><span class="p">,</span> <span class="n">_SCHEME_LEGACY</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">state</span><span class="p">)</span></div>
+
+        <span class="c1"># After unpickling we remain on CPU until update_batch decides backend.</span>
+
+    <span class="c1"># Caches will be recreated on first GPU use via _ensure_gpu_caches().</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Eric Zhu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+    <!-- Theme Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-93507731-1"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'UA-93507731-1', {
+          'anonymize_ip': false,
+      });
+    </script> 
+
+</body>
+</html>
